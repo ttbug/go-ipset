@@ -234,10 +234,13 @@ func Refresh(setName string, entries []string) error {
 func Test(setName, entry string) (bool, error) {
 	out, err := exec.Command(ipsetPath, "test", setName, entry).CombinedOutput()
 	if err == nil {
-		if strings.Contains(string(out), "NOT") {
+		reg, e := regexp.Compile("NOT")
+		if e == nil && reg.MatchString(string(out)) {
 			return false, nil
-		} else {
+		} else if e == nil {
 			return true, nil
+		} else {
+			return false, fmt.Errorf("error testing entry %s: %v", entry, e)
 		}
 	} else {
 		return false, fmt.Errorf("error testing entry %s: %v (%s)", entry, err, out)
