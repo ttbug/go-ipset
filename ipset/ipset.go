@@ -77,6 +77,10 @@ func initCheck() error {
 	return nil
 }
 
+func Init() error {
+	return initCheck()
+}
+
 func createHashSet(name string) error {
 	if s == nil {
 		return fmt.Errorf("please call New function first")
