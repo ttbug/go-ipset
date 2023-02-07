@@ -55,6 +55,8 @@ type IPSet struct {
 	Timeout    int
 }
 
+var s *IPSet
+
 func initCheck() error {
 	if ipsetPath == "" {
 		path, err := exec.LookPath("ipset")
@@ -75,7 +77,10 @@ func initCheck() error {
 	return nil
 }
 
-func (s *IPSet) createHashSet(name string) error {
+func createHashSet(name string) error {
+	if s == nil {
+		return fmt.Errorf("please call New function first")
+	}
 	/*	out, err := exec.Command("/usr/bin/sudo",
 		ipsetPath, "create", name, s.HashType, "family", s.HashFamily, "hashsize", strconv.Itoa(s.HashSize),
 		"maxelem", strconv.Itoa(s.MaxElem), "timeout", strconv.Itoa(s.Timeout), "-exist").CombinedOutput()*/
@@ -93,8 +98,9 @@ func (s *IPSet) createHashSet(name string) error {
 
 // New creates a new set and returns an Interface to it.
 // Example:
-// 	testIpset := ipset.New("test", "hash:ip", &ipset.Params{})
-func New(name string, hashtype string, p *Params) (*IPSet, error) {
+//
+//	testIpset := ipset.New("test", "hash:ip", &ipset.Params{})
+func New(name string, hashtype string, p *Params) error {
 	// Using the ipset utilities default values here
 	if p.HashSize == 0 {
 		p.HashSize = 1024
@@ -110,118 +116,19 @@ func New(name string, hashtype string, p *Params) (*IPSet, error) {
 
 	// Check if hashtype is a type of hash
 	if !strings.HasPrefix(hashtype, "hash:") {
-		return nil, fmt.Errorf("not a hash type: %s", hashtype)
+		return fmt.Errorf("not a hash type: %s", hashtype)
 	}
 
 	if err := initCheck(); err != nil {
-		return nil, err
+		return err
 	}
 
-	s := IPSet{name, hashtype, p.HashFamily, p.HashSize, p.MaxElem, p.Timeout}
-	err := s.createHashSet(name)
-	if err != nil {
-		return nil, err
-	}
-	return &s, nil
-}
-
-// Refresh is used to to overwrite the set with the specified entries.
-// The ipset is updated on the fly by hot swapping it with a temporary set.
-func (s *IPSet) Refresh(entries []string) error {
-	tempName := s.Name + "-temp"
-	err := s.createHashSet(tempName)
+	s = &IPSet{name, hashtype, p.HashFamily, p.HashSize, p.MaxElem, p.Timeout}
+	err := createHashSet(name)
 	if err != nil {
 		return err
 	}
-	for _, entry := range entries {
-		out, err := exec.Command(ipsetPath, "add", tempName, entry, "-exist").CombinedOutput()
-		if err != nil {
-			log.Errorf("error adding entry %s to set %s: %v (%s)", entry, tempName, err, out)
-		}
-	}
-	err = Swap(tempName, s.Name)
-	if err != nil {
-		return err
-	}
-	err = destroyIPSet(tempName)
-	if err != nil {
-		return err
-	}
-	return nil
-}
 
-// Test is used to check whether the specified entry is in the set or not.
-func (s *IPSet) Test(entry string) (bool, error) {
-	out, err := exec.Command(ipsetPath, "test", s.Name, entry).CombinedOutput()
-	if err == nil {
-		reg, e := regexp.Compile("NOT")
-		if e == nil && reg.MatchString(string(out)) {
-			return false, nil
-		} else if e == nil {
-			return true, nil
-		} else {
-			return false, fmt.Errorf("error testing entry %s: %v", entry, e)
-		}
-	} else {
-		return false, fmt.Errorf("error testing entry %s: %v (%s)", entry, err, out)
-	}
-}
-
-// Add is used to add the specified entry to the set.
-// A timeout of 0 means that the entry will be stored permanently in the set.
-func (s *IPSet) Add(entry string, timeout int) error {
-	out, err := exec.Command(ipsetPath, "add", s.Name, entry, "timeout", strconv.Itoa(timeout), "-exist").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("error adding entry %s: %v (%s)", entry, err, out)
-	}
-	return nil
-}
-
-// AddOption is used to add the specified entry to the set.
-// A timeout of 0 means that the entry will be stored permanently in the set.
-func (s *IPSet) AddOption(entry string, option string, timeout int) error {
-	out, err := exec.Command(ipsetPath, "add", s.Name, entry, option, "timeout", strconv.Itoa(timeout), "-exist").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("error adding entry %s with option %s : %v (%s)", entry, option, err, out)
-	}
-	return nil
-}
-
-// Del is used to delete the specified entry from the set.
-func (s *IPSet) Del(entry string) error {
-	out, err := exec.Command(ipsetPath, "del", s.Name, entry, "-exist").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("error deleting entry %s: %v (%s)", entry, err, out)
-	}
-	return nil
-}
-
-// Flush is used to flush all entries in the set.
-func (s *IPSet) Flush() error {
-	out, err := exec.Command(ipsetPath, "flush", s.Name).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("error flushing set %s: %v (%s)", s.Name, err, out)
-	}
-	return nil
-}
-
-// List is used to show the contents of a set
-func (s *IPSet) List() ([]string, error) {
-	out, err := exec.Command(ipsetPath, "list", s.Name).CombinedOutput()
-	if err != nil {
-		return []string{}, fmt.Errorf("error listing set %s: %v (%s)", s.Name, err, out)
-	}
-	r := regexp.MustCompile("(?m)^(.*\n)*Members:\n")
-	list := r.ReplaceAllString(string(out[:]), "")
-	return strings.Split(list, "\n"), nil
-}
-
-// Destroy is used to destroy the set.
-func (s *IPSet) Destroy() error {
-	out, err := exec.Command(ipsetPath, "destroy", s.Name).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("error destroying set %s: %v (%s)", s.Name, err, out)
-	}
 	return nil
 }
 
@@ -294,4 +201,102 @@ func getIpsetVersionString() (string, error) {
 		return "", fmt.Errorf("no ipset version found in string: %s", bytes)
 	}
 	return match[0], nil
+}
+
+func Refresh(setName string, entries []string) error {
+	tempName := setName + "-temp"
+	err := createHashSet(tempName)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		out, err := exec.Command(ipsetPath, "add", tempName, entry, "-exist").CombinedOutput()
+		if err != nil {
+			log.Errorf("error adding entry %s to set %s: %v (%s)", entry, tempName, err, out)
+		}
+	}
+	err = Swap(tempName, setName)
+	if err != nil {
+		return err
+	}
+	err = destroyIPSet(tempName)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// Test is used to check whether the specified entry is in the set or not.
+func Test(setName, entry string) (bool, error) {
+	out, err := exec.Command(ipsetPath, "test", setName, entry).CombinedOutput()
+	if err == nil {
+		reg, e := regexp.Compile("NOT")
+		if e == nil && reg.MatchString(string(out)) {
+			return false, nil
+		} else if e == nil {
+			return true, nil
+		} else {
+			return false, fmt.Errorf("error testing entry %s: %v", entry, e)
+		}
+	} else {
+		return false, fmt.Errorf("error testing entry %s: %v (%s)", entry, err, out)
+	}
+}
+
+// Add is used to add the specified entry to the set.
+// A timeout of 0 means that the entry will be stored permanently in the set.
+func Add(setName, entry string, timeout int) error {
+	out, err := exec.Command(ipsetPath, "add", setName, entry, "timeout", strconv.Itoa(timeout), "-exist").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("error adding entry %s: %v (%s)", entry, err, out)
+	}
+	return nil
+}
+
+// AddOption is used to add the specified entry to the set.
+// A timeout of 0 means that the entry will be stored permanently in the set.
+func AddOption(setName, entry string, option string, timeout int) error {
+	out, err := exec.Command(ipsetPath, "add", setName, entry, option, "timeout", strconv.Itoa(timeout), "-exist").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("error adding entry %s with option %s : %v (%s)", entry, option, err, out)
+	}
+	return nil
+}
+
+// Del is used to delete the specified entry from the set.
+func Del(setName, entry string) error {
+	out, err := exec.Command(ipsetPath, "del", setName, entry, "-exist").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("error deleting entry %s: %v (%s)", entry, err, out)
+	}
+	return nil
+}
+
+// Flush is used to flush all entries in the set.
+func Flush(setName string) error {
+	out, err := exec.Command(ipsetPath, "flush", setName).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("error flushing set %s: %v (%s)", setName, err, out)
+	}
+	return nil
+}
+
+// List is used to show the contents of a set
+func List(setName string) ([]string, error) {
+	out, err := exec.Command(ipsetPath, "list", setName).CombinedOutput()
+	if err != nil {
+		return []string{}, fmt.Errorf("error listing set %s: %v (%s)", setName, err, out)
+	}
+	r := regexp.MustCompile("(?m)^(.*\n)*Members:\n")
+	list := r.ReplaceAllString(string(out[:]), "")
+	return strings.Split(list, "\n"), nil
+}
+
+// Destroy is used to destroy the set.
+func Destroy(setName string) error {
+	out, err := exec.Command(ipsetPath, "destroy", setName).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("error destroying set %s: %v (%s)", setName, err, out)
+	}
+	return nil
 }
