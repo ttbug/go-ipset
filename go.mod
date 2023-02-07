@@ -1,4 +1,4 @@
-module github.com/wolf-joe/go-ipset
+module github.com/ttbug/go-ipset
 
 go 1.18
 
